@@ -2,68 +2,66 @@
 
 MacSerial 是一个原生 macOS 串口调试工具，同时支持 Telnet/TCP 调试。它使用 SwiftUI 构建，界面简洁，适合嵌入式开发、硬件调试、AT 指令测试、Modbus 数据收发、串口日志记录和网络透传测试。
 
-MacSerial is a native macOS serial port and Telnet/TCP debugging tool built with SwiftUI.
+## 搜索关键词
 
-## Keywords
+macOS 串口工具、串口调试助手、串口监视器、串口终端、串口收发、串口日志、串口上位机、Telnet 调试、TCP 调试、网络透传、AT 指令调试、Modbus 测试、嵌入式调试、硬件调试、SwiftUI 串口工具。
 
-macOS serial tool, serial port monitor, serial debugger, UART terminal, Telnet client, TCP debugging tool, SwiftUI serial app, Modbus test tool, AT command tool, 串口调试助手, 串口监视器, macOS 串口工具, Telnet 调试, TCP 调试, 上位机工具。
+## 功能
 
-## Features
+- 原生 macOS SwiftUI 应用
+- 串口收发，支持常见串口参数
+- 支持 9600、115200、460800、921600 等波特率
+- 支持 Telnet/TCP 连接，并过滤基础 Telnet 协商字节
+- 支持文本和 HEX 收发
+- 支持 CR、LF、CRLF 结尾
+- 支持 RX/TX 统计、时间戳开关、方向显示开关
+- 支持接收监视、自动滚动、暂停、清空和保存
+- 支持连接期间自动保存接收内容
+- 支持快捷发送、分组、分页和编辑
+- 支持多窗口独立会话，方便同时打开多个串口或 Telnet 连接
+- 支持紧凑布局，便于一个桌面同时摆放多个窗口
 
-- Native macOS SwiftUI app
-- Serial port receive/send with common port settings
-- Baud rates including 9600, 115200, 460800 and 921600
-- Telnet/TCP client with basic Telnet negotiation filtering
-- Text and HEX receive/send modes
-- CR, LF and CRLF line endings
-- RX/TX counters, timestamp toggle and direction toggle
-- Receive monitor with auto scroll, pause, clear and save
-- Auto-save receive monitor content while connected
-- Quick send commands with groups, pagination and editing
-- Multi-window sessions for opening several serial/Telnet tools at once
-- Compact layout for placing multiple windows on one desktop
+## 截图
 
-## Screenshot
+截图稍后补充。
 
-Screenshot coming soon.
+## 运行环境
 
-## Requirements
+- macOS 14 或更新版本
+- Swift 6 工具链或 Xcode
 
-- macOS 14 or later
-- Swift 6 toolchain / Xcode
+## 开发运行
 
-## Run From Source
+用 Xcode 打开 `Package.swift`，选择 `MacSerial` Scheme，然后按 `Cmd+R`。
 
-Open `Package.swift` in Xcode, select the `MacSerial` scheme, then press `Cmd+R`.
-
-Or run from the command line:
+也可以使用命令行运行：
 
 ```bash
 swift run MacSerial
 ```
 
-## Build
+## 编译
 
-Build the executable:
+编译可执行文件：
 
 ```bash
 swift build
 ```
 
-Build a macOS `.app` bundle:
+生成 macOS `.app` 应用：
 
 ```bash
 bash Scripts/build_app.sh
 ```
 
-The app bundle will be generated at:
+生成位置：
 
 ```text
 .build/release/MacSerial.app
 ```
 
-You can drag `MacSerial.app` into `/Applications`.
+可以把 `MacSerial.app` 拖到 `/Applications` 使用。
 
-## License
+## 开源协议
 
-MacSerial is released under the MIT License. See [LICENSE](LICENSE).
+MacSerial 使用 MIT 协议开源，详见 [LICENSE](LICENSE)。
