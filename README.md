@@ -1,10 +1,12 @@
-# MacSerial
+# MacSerial - macOS 串口调试助手 / Telnet 调试工具
 
-MacSerial 是一个原生 macOS 串口调试工具，同时支持 Telnet/TCP 调试。它使用 SwiftUI 构建，界面简洁，适合嵌入式开发、硬件调试、AT 指令测试、Modbus 数据收发、串口日志记录和网络透传测试。
+MacSerial 是一个原生 macOS 串口调试助手，同时支持 Telnet/TCP 调试。它使用 SwiftUI 构建，适合嵌入式开发、硬件调试、串口收发、串口监视、串口日志记录、AT 指令测试、Modbus 数据收发和网络透传测试。
+
+如果你在找 macOS 上类似 SSCOM、XCOM、串口助手、串口监视器、串口终端、Telnet 调试助手的工具，MacSerial 就是为这个场景做的。
 
 ## 搜索关键词
 
-macOS 串口工具、串口调试助手、串口监视器、串口终端、串口收发、串口日志、串口上位机、Telnet 调试、TCP 调试、网络透传、AT 指令调试、Modbus 测试、嵌入式调试、硬件调试、SwiftUI 串口工具。
+macOS 串口工具、macOS 串口调试助手、Mac 串口助手、串口调试工具、串口调试助手、串口监视器、串口终端、串口收发、串口日志、串口上位机、SSCOM、XCOM、Telnet 调试、Telnet 调试工具、TCP 调试、网络透传、AT 指令调试、Modbus 测试、嵌入式调试、硬件调试、SwiftUI 串口工具。
 
 ## 功能
 
