@@ -1,0 +1,11 @@
+.DS_Store
+.build/
+.swiftpm/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+
+# Generated while building the app icon. The committed .icns is used by the app bundle.
+Resources/AppIcon.iconset/
+Resources/AppIcon.original.png
