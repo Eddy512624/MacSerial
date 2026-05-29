@@ -48,6 +48,9 @@ struct ContentView: View {
         .onChange(of: serialStore.preferences.receiveMode) {
             serialStore.flushReceiveBuffers()
         }
+        .onChange(of: serialStore.preferences.receiveTextEncoding) {
+            serialStore.flushReceiveBuffers()
+        }
         .onChange(of: serialStore.quickCommands) {
             serialStore.saveState()
         }

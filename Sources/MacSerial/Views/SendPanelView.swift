@@ -78,6 +78,9 @@ struct SendPanelView: View {
                     mode: serialStore.preferences.sendMode,
                     onSend: {
                         serialStore.sendDraft()
+                    },
+                    onHistory: { up in
+                        serialStore.recallSendHistory(up: up)
                     }
                 )
 
@@ -178,6 +181,7 @@ private struct SendEditorView: View {
     @Binding var text: String
     let mode: DataMode
     let onSend: () -> Void
+    let onHistory: (Bool) -> Bool
     @State private var isFocused = false
 
     var body: some View {
@@ -193,7 +197,8 @@ private struct SendEditorView: View {
                 text: $text,
                 mode: mode,
                 isFocused: $isFocused,
-                onSend: onSend
+                onSend: onSend,
+                onHistory: onHistory
             )
 
         }
@@ -206,6 +211,7 @@ private struct NativeSendTextView: NSViewRepresentable {
     let mode: DataMode
     @Binding var isFocused: Bool
     let onSend: () -> Void
+    let onHistory: (Bool) -> Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -215,6 +221,7 @@ private struct NativeSendTextView: NSViewRepresentable {
         let textView = PlaceholderTextView()
         textView.delegate = context.coordinator
         textView.onSend = onSend
+        textView.onHistory = onHistory
         textView.string = text
         textView.placeholder = "输入要发送的数据"
         textView.isRichText = false
@@ -249,6 +256,7 @@ private struct NativeSendTextView: NSViewRepresentable {
 
         context.coordinator.parent = self
         textView.onSend = onSend
+        textView.onHistory = onHistory
         if textView.string != text {
             textView.string = text
             textView.needsDisplay = true
@@ -299,12 +307,21 @@ private final class PlaceholderTextView: NSTextView {
         didSet { needsDisplay = true }
     }
     var onSend: (() -> Void)?
+    var onHistory: ((Bool) -> Bool)?
 
     override func keyDown(with event: NSEvent) {
         let isReturn = event.keyCode == 36 || event.keyCode == 76
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if isReturn, !modifiers.contains(.shift) {
             onSend?()
+            return
+        }
+
+        if event.keyCode == 126, onHistory?(true) == true {
+            return
+        }
+
+        if event.keyCode == 125, onHistory?(false) == true {
             return
         }
 

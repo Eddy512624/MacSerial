@@ -21,6 +21,15 @@ struct ReceiveLogView: View {
                     .pickerStyle(.segmented)
                     .frame(width: 124)
 
+                    if serialStore.preferences.receiveMode == .text {
+                        Picker("编码", selection: $serialStore.preferences.receiveTextEncoding) {
+                            ForEach(ReceiveTextEncoding.allCases) { encoding in
+                                Text(encoding.rawValue).tag(encoding)
+                            }
+                        }
+                        .frame(width: 118)
+                    }
+
                     Toggle("时间戳", isOn: $serialStore.preferences.showTimestamp)
                         .toggleStyle(.switch)
                         .fixedSize()

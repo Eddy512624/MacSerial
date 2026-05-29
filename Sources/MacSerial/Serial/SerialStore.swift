@@ -8,7 +8,7 @@ final class SerialStore: ObservableObject {
     @Published var telnetConfig = TelnetConfig()
     @Published var preferences = UserPreferences()
     @Published var messages: [SerialMessage] = [
-        SerialMessage(date: .now, direction: .system, text: "MacSerial v0.3.26 已就绪。请选择连接方式并打开连接。")
+        SerialMessage(date: .now, direction: .system, text: "MacSerial v0.3.27 已就绪。请选择连接方式并打开连接。")
     ]
     @Published var quickCommands: [QuickCommand] = [
         QuickCommand(title: "复位模块", payload: "AT+RST", group: "项圈"),
@@ -34,9 +34,11 @@ final class SerialStore: ObservableObject {
     private var reconnectTimer: Timer?
     private var autoSaveHandle: FileHandle?
     private var pendingReceiveText = ""
+    private var pendingReceiveTextBytes = Data()
     private var pendingReceiveMessageID: UUID?
     private var pendingHexBytes = Data()
     private var pausedReceiveBytes = 0
+    private var sendHistoryCursor: Int?
     private var userRequestedDisconnect = false
 
     init() {
@@ -211,6 +213,32 @@ final class SerialStore: ObservableObject {
         send(draftText, mode: preferences.sendMode, lineEnding: preferences.lineEnding)
     }
 
+    func recallSendHistory(up: Bool) -> Bool {
+        guard !sendHistory.isEmpty else { return false }
+
+        if let cursor = sendHistoryCursor {
+            if up {
+                sendHistoryCursor = min(cursor + 1, sendHistory.count - 1)
+            } else if cursor == 0 {
+                sendHistoryCursor = nil
+                draftText.removeAll()
+                return true
+            } else {
+                sendHistoryCursor = cursor - 1
+            }
+        } else {
+            guard draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, up else {
+                return false
+            }
+            sendHistoryCursor = 0
+        }
+
+        if let sendHistoryCursor {
+            draftText = sendHistory[sendHistoryCursor]
+        }
+        return true
+    }
+
     func sendQuickCommand(_ command: QuickCommand) {
         send(command.payload, mode: command.mode, lineEnding: command.lineEnding)
     }
@@ -218,6 +246,7 @@ final class SerialStore: ObservableObject {
     func clearMessages() {
         messages.removeAll()
         pendingReceiveText.removeAll()
+        pendingReceiveTextBytes.removeAll()
         pendingReceiveMessageID = nil
         pendingHexBytes.removeAll()
     }
@@ -400,7 +429,7 @@ final class SerialStore: ObservableObject {
 
         switch preferences.receiveMode {
         case .text:
-            appendReceivedText(String(decoding: data, as: UTF8.self))
+            appendReceivedText(data)
         case .hex:
             appendReceivedHex(data)
         }
@@ -465,29 +494,49 @@ final class SerialStore: ObservableObject {
         telnetConnection = nil
     }
 
-    private func appendReceivedText(_ text: String) {
-        pendingReceiveText += text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
+    private func appendReceivedText(_ data: Data) {
+        pendingReceiveTextBytes.append(data)
 
-        while let newlineIndex = pendingReceiveText.firstIndex(of: "\n") {
-            let line = String(pendingReceiveText[..<newlineIndex])
+        while let newlineIndex = pendingReceiveTextBytes.firstIndex(where: { $0 == 0x0A || $0 == 0x0D }) {
+            let lineData = pendingReceiveTextBytes[..<newlineIndex]
+            let delimiter = pendingReceiveTextBytes[newlineIndex]
+            var removeEnd = pendingReceiveTextBytes.index(after: newlineIndex)
+
+            if delimiter == 0x0D,
+               removeEnd < pendingReceiveTextBytes.endIndex,
+               pendingReceiveTextBytes[removeEnd] == 0x0A {
+                removeEnd = pendingReceiveTextBytes.index(after: removeEnd)
+            }
+
+            let line = decodedReceiveText(Data(lineData))
             appendReceiveLine(line)
-            pendingReceiveText.removeSubrange(...newlineIndex)
+            pendingReceiveTextBytes.removeSubrange(..<removeEnd)
+            pendingReceiveText.removeAll()
             pendingReceiveMessageID = nil
         }
 
+        pendingReceiveText = decodedReceiveText(pendingReceiveTextBytes)
         if !pendingReceiveText.isEmpty {
             upsertPendingReceiveLine(pendingReceiveText)
         }
     }
 
     private func flushPendingReceiveText() {
-        guard !pendingReceiveText.isEmpty else { return }
-        writeAutoSaveLine(pendingReceiveText)
-        upsertPendingReceiveLine(pendingReceiveText)
+        guard !pendingReceiveTextBytes.isEmpty || !pendingReceiveText.isEmpty else { return }
+        let line = decodedReceiveText(pendingReceiveTextBytes)
+        if !line.isEmpty {
+            writeAutoSaveLine(line)
+            upsertPendingReceiveLine(line)
+        }
         pendingReceiveText.removeAll()
+        pendingReceiveTextBytes.removeAll()
         pendingReceiveMessageID = nil
+    }
+
+    private func decodedReceiveText(_ data: Data) -> String {
+        guard !data.isEmpty else { return "" }
+        return String(data: data, encoding: preferences.receiveTextEncoding.stringEncoding)
+            ?? String(decoding: data, as: UTF8.self)
     }
 
     private func appendReceivedHex(_ data: Data) {
@@ -594,6 +643,7 @@ final class SerialStore: ObservableObject {
 
         sendHistory.removeAll { $0 == value }
         sendHistory.insert(value, at: 0)
+        sendHistoryCursor = nil
         if sendHistory.count > 30 {
             sendHistory.removeLast(sendHistory.count - 30)
         }
