@@ -93,49 +93,37 @@ struct ReceiveLogView: View {
 
             Divider()
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    if serialStore.messages.isEmpty {
-                        VStack(spacing: 8) {
-                            Image(systemName: "text.alignleft")
-                                .font(.system(size: 30))
-                                .foregroundStyle(.secondary)
-                            Text("暂无接收数据")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 160)
-                    } else {
-                        LazyVStack(alignment: .leading, spacing: 5) {
-                            ForEach(serialStore.messages) { message in
-                                MessageRowView(
-                                    message: message,
-                                    showTimestamp: serialStore.preferences.showTimestamp,
-                                    showDirection: serialStore.preferences.showDirection
-                                )
-                                    .id(message.id)
-                            }
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .background(
-                    LinearGradient(
-                        colors: [
-                            Color(nsColor: .textBackgroundColor).opacity(0.72),
-                            Color(nsColor: .textBackgroundColor).opacity(0.5)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
+            ZStack {
+                NativeReceiveLogTextView(
+                    messages: serialStore.messages,
+                    showTimestamp: serialStore.preferences.showTimestamp,
+                    showDirection: serialStore.preferences.showDirection,
+                    autoScroll: serialStore.preferences.autoScroll
                 )
-                .onChange(of: serialStore.messages) { _, messages in
-                    guard serialStore.preferences.autoScroll,
-                          let last = messages.last else { return }
-                    proxy.scrollTo(last.id, anchor: .bottom)
+
+                if serialStore.messages.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "text.alignleft")
+                            .font(.system(size: 30))
+                            .foregroundStyle(.secondary)
+                        Text("暂无接收数据")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 160)
+                    .allowsHitTesting(false)
                 }
             }
+            .background(
+                LinearGradient(
+                    colors: [
+                        Color(nsColor: .textBackgroundColor).opacity(0.72),
+                        Color(nsColor: .textBackgroundColor).opacity(0.5)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
         }
     }
 
@@ -183,43 +171,144 @@ struct ReceiveLogView: View {
     }
 }
 
-private struct MessageRowView: View {
-    let message: SerialMessage
+
+private struct NativeReceiveLogTextView: NSViewRepresentable {
+    let messages: [SerialMessage]
     let showTimestamp: Bool
     let showDirection: Bool
+    let autoScroll: Bool
 
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            if showTimestamp {
-                Text("[\(TimestampFormatter.string(from: message.date))]")
-                    .foregroundStyle(.secondary)
-            }
-
-            if showDirection {
-                Text(message.direction.rawValue)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(directionColor)
-                    .frame(width: 34, alignment: .leading)
-            }
-
-            Text(message.text)
-                .textSelection(.enabled)
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .font(.system(size: 12, design: .monospaced))
-        .padding(.horizontal, 2)
-        .padding(.vertical, 2)
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
     }
 
-    private var directionColor: Color {
-        switch message.direction {
-        case .receive: .teal
-        case .transmit: .indigo
-        case .system: .secondary
-        case .error: .red
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.drawsBackground = false
+        textView.allowsUndo = false
+        textView.usesFindBar = true
+        textView.textContainerInset = NSSize(width: 14, height: 14)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.autoresizingMask = [.width]
+        textView.font = Self.logFont
+
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+
+        let signature = renderSignature
+        if context.coordinator.renderSignature != signature {
+            let previousSelection = textView.selectedRange()
+            textView.textStorage?.setAttributedString(renderedLog())
+            context.coordinator.renderSignature = signature
+
+            if previousSelection.location != NSNotFound, previousSelection.length > 0 {
+                let maxLength = textView.string.count
+                let location = min(previousSelection.location, maxLength)
+                let length = min(previousSelection.length, maxLength - location)
+                textView.setSelectedRange(NSRange(location: location, length: length))
+            }
+        }
+
+        if autoScroll, textView.selectedRange().length == 0 {
+            textView.scrollToEndOfDocument(nil)
         }
     }
 
+    private var renderSignature: String {
+        var signature = "\(showTimestamp)|\(showDirection)|\(messages.count)"
+        if let last = messages.last {
+            signature += "|\(last.id.uuidString)|\(last.text)"
+        }
+        return signature
+    }
+
+    private func renderedLog() -> NSAttributedString {
+        let output = NSMutableAttributedString()
+
+        for (index, message) in messages.enumerated() {
+            append(message, to: output)
+            if index < messages.index(before: messages.endIndex) {
+                output.append(Self.segment("\n"))
+            }
+        }
+
+        return output
+    }
+
+    private func append(_ message: SerialMessage, to output: NSMutableAttributedString) {
+        let hasTimestamp = showTimestamp
+        let hasDirection = showDirection
+
+        if hasTimestamp {
+            output.append(Self.segment("[\(TimestampFormatter.string(from: message.date))]", color: .secondaryLabelColor))
+        }
+
+        if hasDirection {
+            if hasTimestamp {
+                output.append(Self.segment("  "))
+            }
+            output.append(Self.segment(message.direction.rawValue, color: color(for: message.direction), weight: .semibold))
+        }
+
+        if hasTimestamp || hasDirection {
+            output.append(Self.segment(hasTimestamp && hasDirection ? "  " : " "))
+        }
+
+        output.append(Self.segment(message.text, color: .labelColor))
+    }
+
+    private func color(for direction: SerialMessage.Direction) -> NSColor {
+        switch direction {
+        case .receive:
+            return .systemTeal
+        case .transmit:
+            return .systemIndigo
+        case .system:
+            return .secondaryLabelColor
+        case .error:
+            return .systemRed
+        }
+    }
+
+    private static let logFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+
+    private static func segment(_ text: String, color: NSColor = .labelColor, weight: NSFont.Weight = .regular) -> NSAttributedString {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineSpacing = 5
+        paragraphStyle.paragraphSpacing = 0
+        paragraphStyle.lineBreakMode = .byWordWrapping
+
+        return NSAttributedString(
+            string: text,
+            attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: weight),
+                .foregroundColor: color,
+                .paragraphStyle: paragraphStyle
+            ]
+        )
+    }
+
+    final class Coordinator {
+        var renderSignature = ""
+    }
 }
+
