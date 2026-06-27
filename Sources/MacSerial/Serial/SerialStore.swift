@@ -33,6 +33,9 @@ final class SerialStore: ObservableObject {
     private var timedSendTimer: Timer?
     private var reconnectTimer: Timer?
     private var autoSaveHandle: FileHandle?
+    private var pendingReceivedChunks: [Data] = []
+    private var pendingReceivedByteCount = 0
+    private var receiveFlushWorkItem: DispatchWorkItem?
     private var pendingReceiveText = ""
     private var pendingReceiveTextBytes = Data()
     private var pendingReceiveMessageID: UUID?
@@ -89,6 +92,7 @@ final class SerialStore: ObservableObject {
     }
 
     func flushReceiveBuffers() {
+        flushQueuedReceivedData()
         flushPendingReceiveText()
         flushPendingHexBytes()
     }
@@ -133,7 +137,7 @@ final class SerialStore: ObservableObject {
         let newConnection = SerialConnection(
             onReceive: { [weak self] data in
                 Task { @MainActor in
-                    self?.handleReceivedData(data)
+                    self?.enqueueReceivedData(data)
                 }
             },
             onDisconnect: { [weak self] message in
@@ -172,7 +176,7 @@ final class SerialStore: ObservableObject {
             },
             onReceive: { [weak self] data in
                 Task { @MainActor in
-                    self?.handleReceivedData(data)
+                    self?.enqueueReceivedData(data)
                 }
             },
             onDisconnect: { [weak self] message in
@@ -245,6 +249,10 @@ final class SerialStore: ObservableObject {
 
     func clearMessages() {
         messages.removeAll()
+        receiveFlushWorkItem?.cancel()
+        receiveFlushWorkItem = nil
+        pendingReceivedChunks.removeAll(keepingCapacity: true)
+        pendingReceivedByteCount = 0
         pendingReceiveText.removeAll()
         pendingReceiveTextBytes.removeAll()
         pendingReceiveMessageID = nil
@@ -378,6 +386,7 @@ final class SerialStore: ObservableObject {
         timedSendTimer?.invalidate()
         timedSendTimer = nil
         stopReconnectTimer()
+        flushQueuedReceivedData()
         stopAutoSave(announce: false)
         closeActiveConnections()
         isConnected = false
@@ -420,13 +429,53 @@ final class SerialStore: ObservableObject {
         }
     }
 
-    private func handleReceivedData(_ data: Data) {
-        rxBytes += data.count
+    private func enqueueReceivedData(_ data: Data) {
+        guard !data.isEmpty else { return }
+        pendingReceivedChunks.append(data)
+        pendingReceivedByteCount += data.count
+
+        guard receiveFlushWorkItem == nil else { return }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor in
+                self?.flushQueuedReceivedData()
+            }
+        }
+        receiveFlushWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(20), execute: workItem)
+    }
+
+    private func flushQueuedReceivedData() {
+        receiveFlushWorkItem?.cancel()
+        receiveFlushWorkItem = nil
+        guard !pendingReceivedChunks.isEmpty else { return }
+
+        let chunks = pendingReceivedChunks
+        let byteCount = pendingReceivedByteCount
+        pendingReceivedChunks.removeAll(keepingCapacity: true)
+        pendingReceivedByteCount = 0
+        rxBytes += byteCount
+
         guard !preferences.pauseReceiveDisplay else {
-            pausedReceiveBytes += data.count
+            pausedReceiveBytes += byteCount
             return
         }
 
+        let data: Data
+        if chunks.count == 1, let first = chunks.first {
+            data = first
+        } else {
+            var merged = Data(capacity: byteCount)
+            for chunk in chunks {
+                merged.append(chunk)
+            }
+            data = merged
+        }
+
+        processReceivedData(data)
+    }
+
+    private func processReceivedData(_ data: Data) {
         switch preferences.receiveMode {
         case .text:
             appendReceivedText(data)
@@ -436,6 +485,7 @@ final class SerialStore: ObservableObject {
     }
 
     private func handleDisconnect(_ message: String) {
+        flushQueuedReceivedData()
         flushPendingReceiveText()
         flushPendingHexBytes()
         disconnect(message: message, direction: .error)
@@ -496,6 +546,7 @@ final class SerialStore: ObservableObject {
 
     private func appendReceivedText(_ data: Data) {
         pendingReceiveTextBytes.append(data)
+        var completedLines: [String] = []
 
         while let newlineIndex = pendingReceiveTextBytes.firstIndex(where: { $0 == 0x0A || $0 == 0x0D }) {
             let lineData = pendingReceiveTextBytes[..<newlineIndex]
@@ -508,9 +559,12 @@ final class SerialStore: ObservableObject {
                 removeEnd = pendingReceiveTextBytes.index(after: removeEnd)
             }
 
-            let line = decodedReceiveText(Data(lineData))
-            appendReceiveLine(line)
+            completedLines.append(decodedReceiveText(Data(lineData)))
             pendingReceiveTextBytes.removeSubrange(..<removeEnd)
+        }
+
+        if !completedLines.isEmpty {
+            appendReceiveLines(completedLines)
             pendingReceiveText.removeAll()
             pendingReceiveMessageID = nil
         }
@@ -542,10 +596,15 @@ final class SerialStore: ObservableObject {
     private func appendReceivedHex(_ data: Data) {
         pendingHexBytes.append(data)
         let lineWidth = max(preferences.hexBytesPerLine, 8)
+        var completedLines: [String] = []
 
         while pendingHexBytes.count >= lineWidth {
-            appendReceiveLine(HexCodec.string(from: pendingHexBytes.prefix(lineWidth)))
+            completedLines.append(HexCodec.string(from: pendingHexBytes.prefix(lineWidth)))
             pendingHexBytes.removeFirst(lineWidth)
+        }
+
+        if !completedLines.isEmpty {
+            appendReceiveLines(completedLines)
             pendingReceiveMessageID = nil
         }
 
@@ -564,17 +623,30 @@ final class SerialStore: ObservableObject {
     }
 
     private func appendReceiveLine(_ line: String) {
-        if line.isEmpty {
-            return
-        }
+        appendReceiveLines([line])
+    }
 
+    private func appendReceiveLines(_ lines: [String]) {
+        let visibleLines = lines.filter { !$0.isEmpty }
+        guard !visibleLines.isEmpty else { return }
+
+        visibleLines.forEach(writeAutoSaveLine)
+
+        var appendStart = 0
         if let pendingReceiveMessageID,
            let index = messages.firstIndex(where: { $0.id == pendingReceiveMessageID }) {
-            messages[index].text = line
-        } else {
-            append(.receive, line)
+            messages[index].text = visibleLines[0]
+            appendStart = 1
         }
-        writeAutoSaveLine(line)
+
+        guard appendStart < visibleLines.count else { return }
+
+        let date = Date.now
+        let newMessages = visibleLines[appendStart...].map { line in
+            SerialMessage(date: date, direction: .receive, text: line)
+        }
+        messages.append(contentsOf: newMessages)
+        trimMessagesIfNeeded()
     }
 
     private func upsertPendingReceiveLine(_ line: String) {
@@ -595,9 +667,10 @@ final class SerialStore: ObservableObject {
     }
 
     private func trimMessagesIfNeeded() {
-        let limit = 10_000
-        guard messages.count > limit else { return }
-        messages.removeFirst(messages.count - limit)
+        let softLimit = 8_000
+        let pruneThreshold = 10_000
+        guard messages.count > pruneThreshold else { return }
+        messages.removeFirst(messages.count - softLimit)
     }
 
     private func writeAutoSaveLine(_ line: String) {

@@ -288,31 +288,88 @@ private struct NativeReceiveLogTextView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
 
-        let signature = renderSignature
-        if context.coordinator.renderSignature != signature {
-            let previousSelection = textView.selectedRange()
-            textView.textStorage?.setAttributedString(renderedLog())
-            context.coordinator.renderSignature = signature
-
-            if previousSelection.location != NSNotFound, previousSelection.length > 0 {
-                let maxLength = textView.string.count
-                let location = min(previousSelection.location, maxLength)
-                let length = min(previousSelection.length, maxLength - location)
-                textView.setSelectedRange(NSRange(location: location, length: length))
-            }
-        }
+        syncTextStorage(textView, coordinator: context.coordinator)
 
         if autoScroll, textView.selectedRange().length == 0 {
             textView.scrollToEndOfDocument(nil)
         }
     }
 
-    private var renderSignature: String {
-        var signature = "\(showTimestamp)|\(showDirection)|\(messages.count)"
-        if let last = messages.last {
-            signature += "|\(last.id.uuidString)|\(last.text)"
+    private func syncTextStorage(_ textView: NSTextView, coordinator: Coordinator) {
+        guard let textStorage = textView.textStorage else { return }
+
+        if needsFullRender(coordinator: coordinator) {
+            let previousSelection = textView.selectedRange()
+            textStorage.setAttributedString(renderedLog())
+            coordinator.reset(with: messages, showTimestamp: showTimestamp, showDirection: showDirection)
+            restore(previousSelection, in: textView)
+            return
         }
-        return signature
+
+        let oldCount = coordinator.renderedMessages.count
+        if messages.count == oldCount,
+           let last = messages.last,
+           let lastRendered = coordinator.renderedMessages.last,
+           last.id == lastRendered.id,
+           last.text != lastRendered.text {
+            replaceLastMessage(last, in: textStorage, coordinator: coordinator)
+        } else if messages.count > oldCount {
+            appendMessages(messages.dropFirst(oldCount), to: textStorage, coordinator: coordinator)
+        }
+    }
+
+    private func needsFullRender(coordinator: Coordinator) -> Bool {
+        guard coordinator.showTimestamp == showTimestamp,
+              coordinator.showDirection == showDirection,
+              messages.count >= coordinator.renderedMessages.count else {
+            return true
+        }
+
+        for (index, rendered) in coordinator.renderedMessages.enumerated() {
+            if messages[index].id != rendered.id {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func appendMessages(
+        _ newMessages: ArraySlice<SerialMessage>,
+        to textStorage: NSTextStorage,
+        coordinator: Coordinator
+    ) {
+        for message in newMessages {
+            if !coordinator.renderedMessages.isEmpty {
+                textStorage.append(Self.segment("\n"))
+            }
+
+            let start = textStorage.length
+            textStorage.append(renderedMessage(message))
+            coordinator.renderedMessages.append(RenderedMessage(id: message.id, text: message.text))
+            coordinator.messageRanges.append(NSRange(location: start, length: textStorage.length - start))
+        }
+    }
+
+    private func replaceLastMessage(
+        _ message: SerialMessage,
+        in textStorage: NSTextStorage,
+        coordinator: Coordinator
+    ) {
+        guard let range = coordinator.messageRanges.last else { return }
+
+        let rendered = renderedMessage(message)
+        textStorage.replaceCharacters(in: range, with: rendered)
+        coordinator.renderedMessages[coordinator.renderedMessages.count - 1] = RenderedMessage(id: message.id, text: message.text)
+        coordinator.messageRanges[coordinator.messageRanges.count - 1] = NSRange(location: range.location, length: rendered.length)
+    }
+
+    private func restore(_ selection: NSRange, in textView: NSTextView) {
+        guard selection.location != NSNotFound, selection.length > 0 else { return }
+        let maxLength = textView.string.count
+        let location = min(selection.location, maxLength)
+        let length = min(selection.length, maxLength - location)
+        textView.setSelectedRange(NSRange(location: location, length: length))
     }
 
     private func renderedLog() -> NSAttributedString {
@@ -325,6 +382,12 @@ private struct NativeReceiveLogTextView: NSViewRepresentable {
             }
         }
 
+        return output
+    }
+
+    private func renderedMessage(_ message: SerialMessage) -> NSAttributedString {
+        let output = NSMutableAttributedString()
+        append(message, to: output)
         return output
     }
 
@@ -381,8 +444,54 @@ private struct NativeReceiveLogTextView: NSViewRepresentable {
         )
     }
 
+    struct RenderedMessage {
+        let id: UUID
+        let text: String
+    }
+
     final class Coordinator {
-        var renderSignature = ""
+        var renderedMessages: [RenderedMessage] = []
+        var messageRanges: [NSRange] = []
+        var showTimestamp = false
+        var showDirection = false
+
+        func reset(with messages: [SerialMessage], showTimestamp: Bool, showDirection: Bool) {
+            self.renderedMessages = messages.map { RenderedMessage(id: $0.id, text: $0.text) }
+            self.messageRanges = []
+            self.showTimestamp = showTimestamp
+            self.showDirection = showDirection
+
+            var location = 0
+            for (index, message) in messages.enumerated() {
+                let length = NativeReceiveLogTextView.renderedPlainTextLength(
+                    for: message,
+                    showTimestamp: showTimestamp,
+                    showDirection: showDirection
+                )
+                messageRanges.append(NSRange(location: location, length: length))
+                location += length
+                if index < messages.index(before: messages.endIndex) {
+                    location += 1
+                }
+            }
+        }
+    }
+
+    nonisolated private static func renderedPlainTextLength(
+        for message: SerialMessage,
+        showTimestamp: Bool,
+        showDirection: Bool
+    ) -> Int {
+        var parts: [String] = []
+        if showTimestamp {
+            parts.append("[\(TimestampFormatter.string(from: message.date))]")
+        }
+        if showDirection {
+            parts.append(message.direction.rawValue)
+        }
+        parts.append(message.text)
+        let plainText = parts.joined(separator: parts.count > 2 ? "  " : " ")
+        return (plainText as NSString).length
     }
 }
 
