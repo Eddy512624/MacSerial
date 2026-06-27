@@ -6,90 +6,88 @@ struct ReceiveLogView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    Label("接收监视", systemImage: "waveform.path.ecg")
-                        .font(.headline)
-                        .lineLimit(1)
-                        .fixedSize()
+            WrappingToolbarLayout(horizontalSpacing: 12, verticalSpacing: 8) {
+                Label("接收监视", systemImage: "waveform.path.ecg")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .fixedSize()
 
-                    Picker("", selection: $serialStore.preferences.receiveMode) {
-                        ForEach(DataMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
+                Picker("", selection: $serialStore.preferences.receiveMode) {
+                    ForEach(DataMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 124)
+
+                if serialStore.preferences.receiveMode == .text {
+                    Picker("编码", selection: $serialStore.preferences.receiveTextEncoding) {
+                        ForEach(ReceiveTextEncoding.allCases) { encoding in
+                            Text(encoding.rawValue).tag(encoding)
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 124)
+                    .frame(width: 118)
+                }
 
-                    if serialStore.preferences.receiveMode == .text {
-                        Picker("编码", selection: $serialStore.preferences.receiveTextEncoding) {
-                            ForEach(ReceiveTextEncoding.allCases) { encoding in
-                                Text(encoding.rawValue).tag(encoding)
-                            }
-                        }
-                        .frame(width: 118)
-                    }
-
-                    Toggle("时间戳", isOn: $serialStore.preferences.showTimestamp)
-                        .toggleStyle(.switch)
-                        .fixedSize()
-                    Toggle("方向", isOn: $serialStore.preferences.showDirection)
-                        .toggleStyle(.switch)
-                        .fixedSize()
-                    Toggle("自动滚动", isOn: $serialStore.preferences.autoScroll)
-                        .toggleStyle(.switch)
-                        .fixedSize()
-                    Toggle("暂停", isOn: Binding(
-                        get: { serialStore.preferences.pauseReceiveDisplay },
-                        set: { serialStore.setPauseReceiveDisplay($0) }
-                    ))
+                Toggle("时间戳", isOn: $serialStore.preferences.showTimestamp)
                     .toggleStyle(.switch)
                     .fixedSize()
+                Toggle("方向", isOn: $serialStore.preferences.showDirection)
+                    .toggleStyle(.switch)
+                    .fixedSize()
+                Toggle("自动滚动", isOn: $serialStore.preferences.autoScroll)
+                    .toggleStyle(.switch)
+                    .fixedSize()
+                Toggle("暂停", isOn: Binding(
+                    get: { serialStore.preferences.pauseReceiveDisplay },
+                    set: { serialStore.setPauseReceiveDisplay($0) }
+                ))
+                .toggleStyle(.switch)
+                .fixedSize()
 
-                    Text("RX \(serialStore.rxBytes) B")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .fixedSize()
-
-                    Button {
-                        serialStore.clearCounters()
-                    } label: {
-                        Label("清零", systemImage: "gauge.with.dots.needle.0percent")
-                    }
-                    .help("清零收发统计")
+                Text("RX \(serialStore.rxBytes) B")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
                     .fixedSize()
 
-                    Button {
-                        toggleAutoSave()
-                    } label: {
-                        Label(serialStore.isAutoSaving ? "停止保存" : "自动保存", systemImage: serialStore.isAutoSaving ? "stop.circle" : "record.circle")
-                    }
-                    .help(serialStore.isAutoSaving ? "停止自动保存接收显示" : "自动保存接收监视显示内容")
-                    .disabled(!serialStore.isConnected && !serialStore.isAutoSaving)
-                    .fixedSize()
-
-                    Button {
-                        serialStore.clearMessages()
-                    } label: {
-                        Label("清空", systemImage: "trash")
-                    }
-                    .help("清空接收区")
-                    .fixedSize()
-
-                    Button {
-                        saveLog()
-                    } label: {
-                        Label("保存", systemImage: "square.and.arrow.down")
-                    }
-                    .help("保存接收日志")
-                    .disabled(serialStore.messages.isEmpty)
-                    .fixedSize()
+                Button {
+                    serialStore.clearCounters()
+                } label: {
+                    Label("清零", systemImage: "gauge.with.dots.needle.0percent")
                 }
-                .fixedSize(horizontal: true, vertical: false)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .help("清零收发统计")
+                .fixedSize()
+
+                Button {
+                    toggleAutoSave()
+                } label: {
+                    Label(serialStore.isAutoSaving ? "停止保存" : "自动保存", systemImage: serialStore.isAutoSaving ? "stop.circle" : "record.circle")
+                }
+                .help(serialStore.isAutoSaving ? "停止自动保存接收显示" : "自动保存接收监视显示内容")
+                .disabled(!serialStore.isConnected && !serialStore.isAutoSaving)
+                .fixedSize()
+
+                Button {
+                    serialStore.clearMessages()
+                } label: {
+                    Label("清空", systemImage: "trash")
+                }
+                .help("清空接收区")
+                .fixedSize()
+
+                Button {
+                    saveLog()
+                } label: {
+                    Label("保存", systemImage: "square.and.arrow.down")
+                }
+                .help("保存接收日志")
+                .disabled(serialStore.messages.isEmpty)
+                .fixedSize()
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Divider()
 
@@ -171,6 +169,82 @@ struct ReceiveLogView: View {
     }
 }
 
+private struct WrappingToolbarLayout: Layout {
+    let horizontalSpacing: CGFloat
+    let verticalSpacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let availableWidth = proposal.width ?? .greatestFiniteMagnitude
+        let rows = arrangedRows(for: subviews, availableWidth: availableWidth)
+        guard !rows.isEmpty else { return .zero }
+
+        return CGSize(
+            width: proposal.width ?? rows.map(\.width).max() ?? 0,
+            height: rows.map(\.height).reduce(0, +) + verticalSpacing * CGFloat(max(rows.count - 1, 0))
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = arrangedRows(for: subviews, availableWidth: bounds.width)
+        var y = bounds.minY
+
+        for row in rows {
+            var x = bounds.minX
+            for item in row.items {
+                item.subview.place(
+                    at: CGPoint(x: x, y: y + (row.height - item.size.height) / 2),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(item.size)
+                )
+                x += item.size.width + horizontalSpacing
+            }
+            y += row.height + verticalSpacing
+        }
+    }
+
+    private func arrangedRows(for subviews: Subviews, availableWidth: CGFloat) -> [Row] {
+        var rows: [Row] = []
+        var current = Row()
+        let maxWidth = availableWidth.isFinite ? availableWidth : .greatestFiniteMagnitude
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let nextWidth = current.items.isEmpty ? size.width : current.width + horizontalSpacing + size.width
+
+            if !current.items.isEmpty, nextWidth > maxWidth {
+                rows.append(current)
+                current = Row()
+            }
+
+            current.append(Item(subview: subview, size: size), spacing: horizontalSpacing)
+        }
+
+        if !current.items.isEmpty {
+            rows.append(current)
+        }
+        return rows
+    }
+
+    private struct Item {
+        let subview: LayoutSubview
+        let size: CGSize
+    }
+
+    private struct Row {
+        var items: [Item] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+
+        mutating func append(_ item: Item, spacing: CGFloat) {
+            if !items.isEmpty {
+                width += spacing
+            }
+            items.append(item)
+            width += item.size.width
+            height = max(height, item.size.height)
+        }
+    }
+}
 
 private struct NativeReceiveLogTextView: NSViewRepresentable {
     let messages: [SerialMessage]
